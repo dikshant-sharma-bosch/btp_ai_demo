@@ -1,0 +1,227 @@
+*&---------------------------------------------------------------------*
+*& Table: ZCUSTOM_TRANSLATIONS
+*& Purpose: Store custom translation entries for various object types
+*& Usage: Repository for multilingual text storage
+*&---------------------------------------------------------------------*
+
+" This file shows the structure for a custom translation table
+" Use transaction SE11 (ABAP Dictionary) to create this table
+
+TABLE ZCUSTOM_TRANSLATIONS:
+
+FIELD NAME          TYPE        LENGTH  DESCRIPTION
+===========         ========    ======  ==========================
+CLIENT              CLNT        3       Client (Key field)
+OBJECT_ID           CHAR        40      Object Identifier (Key)
+OBJECT_TYPE         CHAR        20      Object Type (Key) 
+LANGUAGE            LANG        1       Language Key (Key)
+TEXT_CONTENT        CHAR        255     Translation Text
+CREATED_BY          CHAR        12      Created By User
+CREATED_ON          DATS        8       Creation Date
+CREATED_AT          TIMS        6       Creation Time
+CHANGED_BY          CHAR        12      Changed By User
+CHANGED_ON          DATS        8       Change Date
+CHANGED_AT          TIMS        6       Change Time
+
+" Primary Key: CLIENT + OBJECT_ID + OBJECT_TYPE + LANGUAGE
+
+" Technical Settings:
+" - Data Class: APPL0 (Application data)
+" - Size Category: 2 (Expected number of records < 10,000)
+" - Buffering: Not allowed (due to frequent updates)
+
+" Foreign Key Relationships:
+" - LANGUAGE -> T002-SPRAS (Language table)
+
+*&---------------------------------------------------------------------*
+*& Table: ZCUSTOM_TRANS_LOG
+*& Purpose: Log translation changes for audit purposes
+*& Usage: Track all modifications to translation data
+*&---------------------------------------------------------------------*
+
+TABLE ZCUSTOM_TRANS_LOG:
+
+FIELD NAME          TYPE        LENGTH  DESCRIPTION
+===========         ========    ======  ==========================
+CLIENT              CLNT        3       Client (Key field)
+LOG_ID              CHAR        20      Log Entry ID (Key)
+OBJECT_ID           CHAR        40      Object Identifier
+OBJECT_TYPE         CHAR        20      Object Type
+LANGUAGE            LANG        1       Language Key
+OPERATION           CHAR        10      Operation (CREATE/UPDATE/DELETE)
+OLD_TEXT            CHAR        255     Previous Text Content
+NEW_TEXT            CHAR        255     New Text Content
+CHANGED_BY          CHAR        12      User Who Made Change
+CHANGED_ON          DATS        8       Change Date
+CHANGED_AT          TIMS        6       Change Time
+TRANSPORT_REQ       CHAR        20      Transport Request
+
+" Primary Key: CLIENT + LOG_ID
+
+*&---------------------------------------------------------------------*
+*& Table: ZCUSTOM_TRANS_CONFIG
+*& Purpose: Configuration settings for translation management
+*& Usage: Store translation workflow and validation rules
+*&---------------------------------------------------------------------*
+
+TABLE ZCUSTOM_TRANS_CONFIG:
+
+FIELD NAME          TYPE        LENGTH  DESCRIPTION
+===========         ========    ======  ==========================
+CLIENT              CLNT        3       Client (Key field)
+CONFIG_KEY          CHAR        30      Configuration Key (Key)
+CONFIG_VALUE        CHAR        100     Configuration Value
+OBJECT_TYPE         CHAR        20      Applicable Object Type
+DESCRIPTION         CHAR        100     Configuration Description
+ACTIVE              CHAR        1       Active Flag (X/blank)
+
+" Primary Key: CLIENT + CONFIG_KEY + OBJECT_TYPE
+
+" Sample Configuration Entries:
+" CONFIG_KEY = 'REQUIRED_LANGUAGES', CONFIG_VALUE = 'EN,DE,FR'
+" CONFIG_KEY = 'AUTO_TRANSLATE', CONFIG_VALUE = 'X'
+" CONFIG_KEY = 'FALLBACK_LANGUAGE', CONFIG_VALUE = 'EN'
+
+*&---------------------------------------------------------------------*
+*& View: ZV_TRANSLATION_STATUS
+*& Purpose: View showing translation completeness status
+*& Usage: Monitor translation progress across languages
+*&---------------------------------------------------------------------*
+
+VIEW ZV_TRANSLATION_STATUS:
+
+SELECT 
+  t.object_id,
+  t.object_type,
+  COUNT(*) as translated_languages,
+  c.required_languages,
+  CASE 
+    WHEN COUNT(*) >= c.required_lang_count THEN 'COMPLETE'
+    WHEN COUNT(*) > 0 THEN 'PARTIAL'
+    ELSE 'MISSING'
+  END as translation_status
+FROM zcustom_translations t
+LEFT JOIN (
+  SELECT 
+    object_type,
+    config_value as required_languages,
+    LENGTH(config_value) - LENGTH(REPLACE(config_value, ',', '')) + 1 as required_lang_count
+  FROM zcustom_trans_config 
+  WHERE config_key = 'REQUIRED_LANGUAGES'
+) c ON t.object_type = c.object_type
+GROUP BY t.object_id, t.object_type, c.required_languages, c.required_lang_count;
+
+*&---------------------------------------------------------------------*
+*& Authorization Object: Z_TRANS_AUTH
+*& Purpose: Control access to translation functionality
+*& Usage: Restrict who can create/modify translations
+*&---------------------------------------------------------------------*
+
+AUTHORIZATION OBJECT Z_TRANS_AUTH:
+  ACTVT (Activity): 01=Create, 02=Change, 03=Display, 06=Delete
+  OBJTYPE (Object Type): Object type being translated
+  LANGUAGE (Language): Language code for translation
+
+*&---------------------------------------------------------------------*
+*& Number Range Object: ZTR_LOG_ID
+*& Purpose: Generate unique log IDs for translation audit log
+*& Usage: Automatic numbering for log entries
+*&---------------------------------------------------------------------*
+
+NUMBER RANGE OBJECT ZTR_LOG_ID:
+  Number Range Interval: 01
+  From Number: 0000000001
+  To Number: 9999999999
+  External: No
+  Buffer: Yes
+
+*&---------------------------------------------------------------------*
+*& Domain and Data Elements
+*& Purpose: Reusable data definitions for translation tables
+*&---------------------------------------------------------------------*
+
+DOMAIN Z_TRANS_OBJTYPE:
+  Data Type: CHAR
+  Length: 20
+  Description: Translation Object Type
+  
+  Value Range:
+  CUSTOM_FIELD    = Custom Field Description
+  CUSTOM_TABLE    = Custom Table Description  
+  CUSTOM_MESSAGE  = Custom Message Text
+  CUSTOM_REPORT   = Custom Report Description
+  CUSTOM_FORM     = Custom Form Label
+
+DATA ELEMENT Z_TRANS_OBJTYPE:
+  Domain: Z_TRANS_OBJTYPE
+  Short Description: Translation Object Type
+  Medium Description: Translation Object Type
+  Long Description: Object Type for Translation Management
+
+DOMAIN Z_TRANS_STATUS:
+  Data Type: CHAR
+  Length: 10
+  Description: Translation Status
+  
+  Value Range:
+  COMPLETE   = Translation Complete
+  PARTIAL    = Partial Translation
+  MISSING    = Translation Missing
+  PENDING    = Translation Pending
+
+DATA ELEMENT Z_TRANS_STATUS:
+  Domain: Z_TRANS_STATUS
+  Short Description: Translation Status
+  Medium Description: Translation Completion Status
+  Long Description: Status of Translation Completeness
+
+*&---------------------------------------------------------------------*
+*& Search Help: ZSH_LANGUAGES
+*& Purpose: Search help for language selection
+*& Usage: Help users select valid languages
+*&---------------------------------------------------------------------*
+
+SEARCH HELP ZSH_LANGUAGES:
+  Selection Method: Table T002
+  Dialog Type: Display values immediately
+  
+  Search Help Parameters:
+  SPRAS (Export/Import): Language Key
+  SPTXT (Export): Language Description
+  LAISO (Export): ISO Language Code
+
+*&---------------------------------------------------------------------*
+*& Maintenance View: ZV_TRANS_MAINT
+*& Purpose: Table maintenance for translation configuration
+*& Usage: SM30 maintenance for translation settings
+*&---------------------------------------------------------------------*
+
+TABLE MAINTENANCE:
+  Table/View: ZCUSTOM_TRANS_CONFIG
+  Authorization Group: &NC&
+  Function Group: ZFG_TRANS_MAINT
+  Type: One Step
+  Screen Number: 100
+
+" Include standard table maintenance events:
+" - Before Save
+" - After Save  
+" - Before Delete
+" - Field validation
+
+*&---------------------------------------------------------------------*
+*& Background Job: Z_TRANSLATION_SYNC
+*& Purpose: Synchronize translations with external systems
+*& Usage: Scheduled job to sync translation data
+*&---------------------------------------------------------------------*
+
+" Program: Z_TRANSLATION_SYNC_JOB
+" Job Class: C (Background)
+" Frequency: Daily at 02:00
+" User: BATCH_USER
+
+" Job Steps:
+" 1. Export changed translations to external format
+" 2. Import updated translations from external systems
+" 3. Validate translation consistency
+" 4. Send notification of sync results
